@@ -1,0 +1,61 @@
+name: EpubCheck Validation
+
+# Runs whenever an .epub file is added or changed, and lets you trigger it manually
+on:
+  push:
+    paths:
+      - '**/*.epub'
+  pull_request:
+    paths:
+      - '**/*.epub'
+  workflow_dispatch:
+
+jobs:
+  validate-epub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java (required by EpubCheck)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download and install EpubCheck
+        run: |
+          EPUBCHECK_VERSION="5.1.0"
+          curl -L -o epubcheck.zip "https://github.com/w3c/epubcheck/releases/download/v${EPUBCHECK_VERSION}/epubcheck-${EPUBCHECK_VERSION}.zip"
+          unzip -q epubcheck.zip
+          echo "EPUBCHECK_JAR=$(pwd)/epubcheck-${EPUBCHECK_VERSION}/epubcheck.jar" >> "$GITHUB_ENV"
+
+      - name: Find and validate all .epub files
+        run: |
+          set -e
+          FOUND_ANY=0
+          FAILED=0
+
+          # Find every .epub file in the repo, skip nothing hidden like .git
+          while IFS= read -r -d '' file; do
+            FOUND_ANY=1
+            echo "::group::Validating $file"
+            if java -jar "$EPUBCHECK_JAR" "$file"; then
+              echo "PASSED: $file"
+            else
+              echo "FAILED: $file"
+              FAILED=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -type f -name "*.epub" -not -path "./.git/*" -print0)
+
+          if [ "$FOUND_ANY" -eq 0 ]; then
+            echo "No .epub files found in this repository."
+          fi
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "One or more EPUB files failed validation. See logs above for details."
+            exit 1
+          fi
+
+          echo "All EPUB files passed validation."
